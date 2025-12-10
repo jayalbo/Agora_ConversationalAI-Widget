@@ -1,0 +1,319 @@
+import { NextRequest, NextResponse } from "next/server";
+import axios from "axios";
+import pkg from "agora-token";
+const { RtcTokenBuilder, RtcRole } = pkg;
+
+// Mock product data - in production, this would fetch from a database
+async function fetchProduct() {
+  return {
+    id: "1",
+    name: "Sony WH-1000XM5 Wireless Noise Cancelling Headphones",
+    price: 399.99,
+    originalPrice: 449.99,
+    discount: 11,
+    rating: 4.7,
+    reviewCount: 2847,
+    inStock: true,
+    description:
+      "Industry-leading noise cancellation with Dual Noise Sensor technology. Premium sound quality with LDAC codec support. Up to 30-hour battery life with quick charge. Comfortable design with soft pressure-relieving ear pads.",
+    specifications: {
+      "Noise Cancellation": "Industry-leading with Dual Noise Sensor",
+      "Battery Life": "Up to 30 hours",
+      "Quick Charge": "3 min charge = 3 hours playback",
+      Connectivity: "Bluetooth 5.2, NFC, 3.5mm jack",
+      Weight: "250g",
+      Color: "Black, Silver, Blue",
+    },
+    images: [
+      "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=800",
+      "https://images.unsplash.com/photo-1484704849700-f032a568e944?w=800",
+      "https://images.unsplash.com/photo-1572569511254-d8f925fe2cbb?w=800",
+    ],
+    reviews: [
+      {
+        id: 1,
+        userName: "Sarah M.",
+        rating: 5,
+        date: "2024-01-15",
+        title: "Best headphones I've ever owned!",
+        comment:
+          "The noise cancellation is incredible. I can barely hear anything when these are on. Sound quality is amazing and the battery lasts forever. Worth every penny!",
+        verified: true,
+      },
+      {
+        id: 2,
+        userName: "Michael T.",
+        rating: 5,
+        date: "2024-01-10",
+        title: "Perfect for travel",
+        comment:
+          "Used these on a 12-hour flight and they were a game changer. Comfortable for long periods and the noise cancellation made the flight so much better.",
+        verified: true,
+      },
+      {
+        id: 3,
+        userName: "Jessica L.",
+        rating: 4,
+        date: "2024-01-08",
+        title: "Great sound, minor comfort issue",
+        comment:
+          "Sound quality is excellent and noise cancellation works well. Only complaint is they can get a bit warm after wearing for several hours, but overall very satisfied.",
+        verified: true,
+      },
+      {
+        id: 4,
+        userName: "David K.",
+        rating: 5,
+        date: "2024-01-05",
+        title: "Worth the investment",
+        comment:
+          "I was hesitant about the price, but these are absolutely worth it. The build quality is premium and they sound incredible. Battery life is as advertised.",
+        verified: true,
+      },
+      {
+        id: 5,
+        userName: "Emily R.",
+        rating: 4,
+        date: "2024-01-03",
+        title: "Excellent but pricey",
+        comment:
+          "These are fantastic headphones with great features. The only reason I'm giving 4 stars is the price point, but if you can afford them, they're top tier.",
+        verified: true,
+      },
+      {
+        id: 6,
+        userName: "Robert P.",
+        rating: 5,
+        date: "2023-12-28",
+        title: "Outstanding quality",
+        comment:
+          "The sound clarity is unmatched. I use these for both music and calls, and the microphone quality is excellent. The touch controls are intuitive and responsive.",
+        verified: true,
+      },
+      {
+        id: 7,
+        userName: "Lisa W.",
+        rating: 4,
+        date: "2023-12-25",
+        title: "Great for work from home",
+        comment:
+          "Perfect for video calls and blocking out background noise. The comfort is good for all-day wear. Only wish the case was a bit smaller for travel.",
+        verified: true,
+      },
+    ],
+  };
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { channel, userId, token } = body;
+
+    console.log(`[POST] /api/agora/start-agent`);
+    console.log(
+      "Request body:",
+      JSON.stringify(
+        { channel, userId, token: token?.substring(0, 20) + "..." },
+        null,
+        2
+      )
+    );
+
+    if (!channel || !userId || !token) {
+      return NextResponse.json(
+        { error: "Channel, userId, and token are required" },
+        { status: 400 }
+      );
+    }
+
+    // Get product context
+    const product = await fetchProduct();
+    const context = `You are a helpful shopping assistant for an e-commerce website. 
+Your primary focus is helping customers with this specific product, but you can also answer related shopping questions.
+
+Product: ${product.name}
+Price: $${product.price} (Original: $${product.originalPrice}, Save ${
+      product.discount
+    }%)
+Rating: ${product.rating}/5 stars (${product.reviewCount} reviews)
+Stock Status: ${product.inStock ? "In Stock" : "Out of Stock"}
+Description: ${product.description}
+
+Specifications:
+${Object.entries(product.specifications)
+  .map(([key, value]) => `- ${key}: ${value}`)
+  .join("\n")}
+
+Available Colors: Black, Silver, Blue
+
+Recent Customer Reviews:
+${product.reviews
+  .slice(0, 5)
+  .map(
+    (r: any) =>
+      `• ${r.userName} (${r.rating}/5 stars): "${r.title}" - ${r.comment}`
+  )
+  .join("\n\n")}
+
+IMPORTANT RULES:
+1. Answer questions about this product, including: features, reviews, pricing, specifications, availability, colors, variants, shipping, returns, and any product-related questions
+2. If asked about product availability or colors, provide helpful information. For example, if asked "Can I get Red?" or "Do you have it in red?", explain the available colors (Black, Silver, Blue) and that red is not currently available
+3. If asked about unrelated topics (cooking, baking, recipes, weather, sports, politics, general knowledge, completely different products), politely redirect: "I'm here to help you with this product. Would you like to know about its features, reviews, or specifications?"
+4. Be helpful, friendly, and concise
+5. Reference specific reviews when relevant to answer questions
+6. If asked about availability, mention it's ${
+      product.inStock ? "currently in stock" : "currently out of stock"
+    }
+7. Help with purchase decisions by comparing features, mentioning reviews, and highlighting value
+8. Answer questions about product variants, colors, and options naturally and helpfully`;
+
+    const APP_ID = process.env.AGORA_APP_ID;
+    const API_KEY = process.env.AGORA_API_KEY;
+    const API_SECRET = process.env.AGORA_API_SECRET;
+
+    if (!APP_ID || !API_KEY || !API_SECRET) {
+      return NextResponse.json(
+        { error: "Missing Agora credentials" },
+        { status: 500 }
+      );
+    }
+
+    // Generate token for agent (UID 1000)
+    const APP_CERTIFICATE = process.env.AGORA_APP_CERTIFICATE;
+    if (!APP_CERTIFICATE) {
+      return NextResponse.json(
+        { error: "Missing APP_CERTIFICATE" },
+        { status: 500 }
+      );
+    }
+
+    const role = RtcRole.PUBLISHER;
+    const expirationTimeInSeconds = 3600;
+    const currentTimestamp = Math.floor(Date.now() / 1000);
+    const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds;
+    const agentRtmUserId = "1000"; // Agent RTM user ID
+
+    // Generate token valid for both RTC and RTM for the agent
+    // RTC UID: 1000 (numeric to match agent_rtc_uid), RTM UID: "1000" (string)
+    const agentToken = RtcTokenBuilder.buildTokenWithRtm2(
+      APP_ID,
+      APP_CERTIFICATE,
+      channel,
+      1000, // RTC UID (numeric, matches agent_rtc_uid "1000")
+      role,
+      privilegeExpiredTs, // token expiration
+      privilegeExpiredTs, // join channel privilege
+      privilegeExpiredTs, // publish audio privilege
+      privilegeExpiredTs, // publish video privilege
+      privilegeExpiredTs, // publish data stream privilege
+      agentRtmUserId, // RTM user ID (string "1000")
+      privilegeExpiredTs // RTM token expiration
+    );
+
+    const auth = Buffer.from(`${API_KEY}:${API_SECRET}`).toString("base64");
+
+    const payload = {
+      name: `ecommerce_ai_agent_${Date.now()}_${Math.random()
+        .toString(36)
+        .substring(7)}`,
+      properties: {
+        channel: channel,
+        token: agentToken,
+        agent_rtc_uid: "1000",
+        remote_rtc_uids: [`${Number(userId)}`],
+        idle_timeout: 120,
+        advanced_features: {
+          enable_rtm: true, // Start the Signaling service (required for transcripts)
+        },
+        parameters: {
+          data_channel: "rtm", // Enable Signaling as the data transmission channel (required for transcripts)
+        },
+        llm: {
+          url:
+            process.env.LLM_URL || "https://api.openai.com/v1/chat/completions",
+          api_key: process.env.LLM_API_KEY || "",
+          system_messages: [
+            {
+              role: "system",
+              content: context,
+            },
+          ],
+          greeting_message:
+            "Hello! I'm here to help you with this product. Ask me anything about features, reviews, or specifications!",
+          failure_message:
+            "I'm sorry, I can only assist with questions related to this product. Could you please ask about our product?",
+          max_history: 10,
+          params: {
+            model: process.env.LLM_MODEL || "gpt-4o-mini",
+          },
+        },
+        asr: {
+          language: "en-US",
+        },
+        tts: {
+          vendor: "microsoft",
+          params: {
+            key: process.env.TTS_API_KEY || "",
+            region: process.env.TTS_REGION || "eastus",
+            voice_name: "en-US-AndrewMultilingualNeural",
+            rate: "1.3",
+          },
+        },
+      },
+    };
+
+    console.log(`[start-agent] Agent token (UID 1000): ${agentToken}`);
+    console.log(`[start-agent] User token (UID ${userId}): ${token}`);
+    console.log(
+      `[start-agent] Complete /join payload:`,
+      JSON.stringify(payload, null, 2)
+    );
+
+    const response = await axios.post(
+      `https://api.agora.io/api/conversational-ai-agent/v2/projects/${APP_ID}/join`,
+      payload,
+      {
+        headers: {
+          Authorization: `Basic ${auth}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    console.log("Response:", JSON.stringify(response.data, null, 2));
+    return NextResponse.json(response.data);
+  } catch (error) {
+    const err = error as any;
+    const status = err?.response?.status;
+    const data = err?.response?.data;
+
+    // Handle 409 Conflict - agent already running
+    if (status === 409 && data?.agent_id) {
+      console.log(
+        "Agent already running, returning existing agent:",
+        data.agent_id
+      );
+      return NextResponse.json({
+        agent_id: data.agent_id,
+        status: data.status || "RUNNING",
+        create_ts: data.create_ts,
+        ...data,
+      });
+    }
+
+    const message =
+      data?.detail ||
+      data?.message ||
+      err?.message ||
+      "Failed to start AI agent";
+
+    console.error(
+      "[start-agent] error:",
+      JSON.stringify(data || err?.message, null, 2)
+    );
+    return NextResponse.json(
+      { error: message, detail: data || err?.message },
+      { status: 500 }
+    );
+  }
+}
