@@ -449,6 +449,7 @@ export class ConversationalAIAPI extends EventHelper<IConversationalAIAPIEventHa
    * ```
    */
   public async sendText(agentUserId: string, message: IChatMessageText) {
+    await this.interrupt(agentUserId); // interrupt the agent before sending the message
     const traceId = genTranceID();
     this.callMessagePrint(
       ELoggerType.debug,
@@ -475,7 +476,7 @@ export class ConversationalAIAPI extends EventHelper<IConversationalAIAPIEventHa
 
     const payload = {
       priority: message.priority ?? EChatMessagePriority.INTERRUPTED,
-      interruptable: message.responseInterruptable ?? true,
+      interruptable: true,
       message: message.text ?? "",
     };
 

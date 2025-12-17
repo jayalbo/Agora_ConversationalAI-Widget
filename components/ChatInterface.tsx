@@ -55,6 +55,10 @@ export function ChatInterface({ product, onClose }: ChatInterfaceProps) {
   const isInitializingRef = useRef(false);
   const rtmClientRef = useRef<any>(null);
   const convoApiRef = useRef<ConversationalAIAPI | null>(null);
+  const videoContainerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const videoElementRef = useRef<HTMLVideoElement | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
 
   // Initialize Agora RTC connection
   const agora = useAgora(
@@ -72,6 +76,130 @@ export function ChatInterface({ product, onClose }: ChatInterfaceProps) {
           uid: 0,
         }
   );
+
+  // Render video to canvas with transparent background (chroma key removal)
+  useEffect(() => {
+    if (!agora?.remoteVideoTrack || !canvasRef.current) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return;
+
+    // Create a hidden video element to play the track
+    const videoElement = document.createElement("video");
+    videoElement.autoplay = true;
+    videoElement.playsInline = true;
+    videoElement.style.display = "none";
+    document.body.appendChild(videoElement);
+    videoElementRef.current = videoElement;
+
+    // Play the video track on the hidden element
+    agora.remoteVideoTrack.play(videoElement);
+
+    // Function to apply chroma key (green screen removal) - using improved algorithm
+    const applyChromaKey = (imageData: ImageData) => {
+      const data = imageData.data;
+      const greenThreshold = 100;
+
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+
+        // Check if pixel is green (green screen detection)
+        // Green is significantly more than red and blue
+        const isGreen = g > greenThreshold && g > r * 1.2 && g > b * 1.2;
+
+        if (isGreen) {
+          data[i + 3] = 0; // Make transparent
+        }
+      }
+
+      return imageData;
+    };
+
+    // Function to draw frame with chroma key
+    const drawFrame = () => {
+      if (!videoElement || videoElement.readyState !== videoElement.HAVE_ENOUGH_DATA) {
+        animationFrameRef.current = requestAnimationFrame(drawFrame);
+        return;
+      }
+
+      // Get actual video dimensions
+      const videoWidth = videoElement.videoWidth;
+      const videoHeight = videoElement.videoHeight;
+      
+      if (videoWidth === 0 || videoHeight === 0) {
+        animationFrameRef.current = requestAnimationFrame(drawFrame);
+        return;
+      }
+
+      // Container dimensions
+      const containerWidth = 320; // w-80 = 320px
+      const containerHeight = 240; // h-[240px]
+      
+      // Calculate aspect ratios
+      const aspectRatio = videoWidth / videoHeight;
+      
+      // Calculate dimensions to maintain aspect ratio (fit within container)
+      let drawWidth = containerWidth;
+      let drawHeight = containerWidth / aspectRatio;
+      let offsetX = 0;
+      let offsetY = 0;
+      
+      // If height exceeds container, scale to fit height instead
+      if (drawHeight > containerHeight) {
+        drawHeight = containerHeight;
+        drawWidth = containerHeight * aspectRatio;
+        offsetX = (containerWidth - drawWidth) / 2;
+      } else {
+        offsetY = (containerHeight - drawHeight) / 2;
+      }
+      
+      // Set canvas size to match video dimensions for better quality
+      canvas.width = videoWidth;
+      canvas.height = videoHeight;
+
+      // Clear canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw video frame to canvas at full resolution
+      ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+
+      // Get image data and apply chroma key
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const processedImageData = applyChromaKey(imageData);
+      ctx.putImageData(processedImageData, 0, 0);
+
+      // Continue animation loop
+      animationFrameRef.current = requestAnimationFrame(drawFrame);
+    };
+
+    // Start the animation loop when video metadata is loaded
+    videoElement.addEventListener("loadedmetadata", () => {
+      drawFrame();
+    });
+    
+    // Also start if video is already loaded
+    if (videoElement.readyState >= videoElement.HAVE_METADATA) {
+      drawFrame();
+    }
+
+    // Cleanup function
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      if (agora?.remoteVideoTrack) {
+        agora.remoteVideoTrack.stop();
+      }
+      if (videoElementRef.current) {
+        videoElementRef.current.remove();
+        videoElementRef.current = null;
+      }
+    };
+  }, [agora?.remoteVideoTrack]);
 
   // Update agent volume when remote audio track changes or volume changes
   useEffect(() => {
@@ -116,6 +244,7 @@ export function ChatInterface({ product, onClose }: ChatInterfaceProps) {
             channel: initData.channel,
             userId: initData.uid,
             token: initData.token,
+            productId: product.id, // Pass product ID so AI knows which product to discuss
           }),
         });
 
@@ -162,12 +291,12 @@ export function ChatInterface({ product, onClose }: ChatInterfaceProps) {
     const getMicrophones = async () => {
       try {
         if (!agora?.localAudioTrack) return;
-        
+
         const AgoraRTC = (await import("agora-rtc-sdk-ng")).default;
         // Use Agora's getMicrophones method
         const mics = await AgoraRTC.getMicrophones();
         setMicrophones(mics);
-        
+
         if (mics.length > 0 && !selectedMicrophone) {
           // Set the first microphone as default
           setSelectedMicrophone(mics[0].deviceId);
@@ -177,7 +306,11 @@ export function ChatInterface({ product, onClose }: ChatInterfaceProps) {
       }
     };
 
-    if (typeof window !== "undefined" && agora?.isConnected && agora?.localAudioTrack) {
+    if (
+      typeof window !== "undefined" &&
+      agora?.isConnected &&
+      agora?.localAudioTrack
+    ) {
       getMicrophones();
     }
   }, [agora?.isConnected, agora?.localAudioTrack]);
@@ -251,6 +384,10 @@ export function ChatInterface({ product, onClose }: ChatInterfaceProps) {
             JSON.stringify(transcripts, null, 2)
           );
 
+          // Get user's UID for comparison
+          const userRtcUid = agoraConfig?.uid?.toString() || "";
+          const userRtmUid = agoraConfig?.rtmUserId || "";
+
           const newMessages: ChatMessage[] = transcripts
             .filter((item) => {
               // Check if item has text - could be in item.text or (item as any).data?.text (Frank's structure)
@@ -275,22 +412,44 @@ export function ChatInterface({ product, onClose }: ChatInterfaceProps) {
               }
 
               // IMPORTANT: Check for user transcription FIRST to avoid misidentifying
-              const isUserMessage =
-                item.metadata?.object === "user.transcription" ||
-                itemAny.data?.speaker?.toLowerCase().includes("user");
-
-              // First, determine the UID to check if it's an agent message
+              // User transcriptions can come in different formats:
+              // 1. metadata.object === "user.transcription"
+              // 2. data.speaker includes "user"
+              // 3. UID matches the user's RTC UID (not "1000" which is agent)
+              // 4. publisher matches user's RTM user ID
               const itemUid = String(
                 item.uid ||
                   itemAny.agentUserId ||
                   itemAny.data?.agentUserId ||
+                  itemAny.publisher ||
                   "unknown"
               );
+
+              // Check if UID matches user's UID (either RTC or RTM)
+              const matchesUserUid = 
+                itemUid === userRtcUid || 
+                itemUid === userRtmUid ||
+                String(item.uid) === userRtcUid ||
+                String(itemAny.publisher) === userRtmUid;
+
+              // Check if UID is NOT the agent (agent is always "1000")
+              const isNotAgentUid = itemUid !== "1000" && itemUid !== "unknown";
+
+              const isUserMessage =
+                item.metadata?.object === "user.transcription" ||
+                itemAny.data?.speaker?.toLowerCase().includes("user") ||
+                itemAny.object === "user.transcription" ||
+                matchesUserUid ||
+                (isNotAgentUid && 
+                 itemUid !== "" && 
+                 !item.metadata?.object?.includes("assistant") &&
+                 !itemAny.data?.speaker?.toLowerCase().includes("assistant"));
 
               const isAgentMessage =
                 !isUserMessage &&
                 (itemUid === "1000" ||
                   item.metadata?.object === "assistant.transcription" ||
+                  itemAny.object === "assistant.transcription" ||
                   itemAny.data?.speaker?.toLowerCase().includes("assistant") ||
                   (item.metadata && "quiet" in item.metadata));
 
@@ -316,13 +475,29 @@ export function ChatInterface({ product, onClose }: ChatInterfaceProps) {
                 item.uid ||
                   itemAny.agentUserId ||
                   itemAny.data?.agentUserId ||
+                  itemAny.publisher ||
                   "unknown"
               );
 
               // IMPORTANT: Check for user transcription FIRST to avoid misidentifying user messages as agent
+              // Use the same detection logic as in the filter above
+              const matchesUserUid = 
+                itemUid === userRtcUid || 
+                itemUid === userRtmUid ||
+                String(item.uid) === userRtcUid ||
+                String(itemAny.publisher) === userRtmUid;
+
+              const isNotAgentUid = itemUid !== "1000" && itemUid !== "unknown";
+
               const isUserMessage =
                 item.metadata?.object === "user.transcription" ||
-                itemAny.data?.speaker?.toLowerCase().includes("user");
+                itemAny.data?.speaker?.toLowerCase().includes("user") ||
+                itemAny.object === "user.transcription" ||
+                matchesUserUid ||
+                (isNotAgentUid && 
+                 itemUid !== "" && 
+                 !item.metadata?.object?.includes("assistant") &&
+                 !itemAny.data?.speaker?.toLowerCase().includes("assistant"));
 
               // Check if it's agent: UID is "1000" or the metadata indicates it's an agent transcription
               // Only mark as agent if it's NOT a user message
@@ -330,18 +505,23 @@ export function ChatInterface({ product, onClose }: ChatInterfaceProps) {
                 !isUserMessage &&
                 (itemUid === "1000" ||
                   item.metadata?.object === "assistant.transcription" ||
+                  itemAny.object === "assistant.transcription" ||
                   itemAny.data?.speaker?.toLowerCase().includes("assistant") ||
                   (item.metadata && "quiet" in item.metadata)); // Agent transcriptions have "quiet" field
 
               console.log("[ChatInterface] Transcript item:", {
                 uid: item.uid,
                 agentUserId: itemAny.agentUserId,
+                publisher: itemAny.publisher,
                 itemUid,
-                text,
+                text: text.substring(0, 50),
+                isUserMessage,
                 isAgent,
                 metadata: item.metadata,
+                object: itemAny.object,
                 data: itemAny.data,
                 metadataObject: item.metadata?.object,
+                fullItem: item, // Log full item for debugging
               });
               return {
                 role: isAgent ? "assistant" : "user",
@@ -659,6 +839,19 @@ export function ChatInterface({ product, onClose }: ChatInterfaceProps) {
   };
 
   const handleEndCall = async () => {
+    // Call leave endpoint for the Agora Conversational AI agent
+    if (agentId) {
+      try {
+        await fetch("/api/agora/leave-agent", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ agentId }),
+        });
+      } catch (e) {
+        // Ignore errors when leaving agent
+      }
+    }
+
     if (agora) {
       agora.leave();
     }
@@ -719,10 +912,10 @@ export function ChatInterface({ product, onClose }: ChatInterfaceProps) {
       console.error("Local audio track not available");
       return;
     }
-    
+
     const previousDeviceId = selectedMicrophone;
     setSelectedMicrophone(deviceId);
-    
+
     try {
       // Use setDevice method on the microphone audio track
       await agora.localAudioTrack.setDevice(deviceId);
@@ -734,36 +927,67 @@ export function ChatInterface({ product, onClose }: ChatInterfaceProps) {
     }
   };
 
-  if (isMinimized) {
-    return (
-      <div className="fixed bottom-6 right-6 z-50">
-        <button
-          onClick={() => setIsMinimized(false)}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl shadow-lg flex items-center gap-2 text-sm font-medium transition"
-        >
-          <div className="relative">
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
-              <path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v4M8 22h8" />
-            </svg>
-            {agora?.isConnected && (
-              <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-green-400 rounded-full border border-white animate-pulse"></div>
-            )}
-          </div>
-          <span>AI Assistant</span>
-          {agora?.isConnected && (
-            <span className="text-xs bg-green-500 px-2 py-0.5 rounded-full">
-              Active
-            </span>
-          )}
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <div className="fixed bottom-6 right-6 z-50 w-80">
-      <div className="bg-white rounded-xl shadow-2xl border border-gray-200 h-[400px] flex flex-col overflow-hidden">
+    <>
+      {/* Video Container - Always visible, positioned directly on top of chat or minimized button */}
+      {agora?.remoteVideoTrack && (
+        <div 
+          ref={videoContainerRef}
+          className={`fixed w-80 h-[240px]`}
+          style={{ 
+            zIndex: 45, // Lower z-index so buttons (z-50+) are always clickable
+            // Position directly on top with no gap
+            // Chat container: bottom-6 (24px) + h-[400px] = top edge at 424px
+            // Overlap by 30px to compensate for video/canvas gap when expanded
+            // When minimized: button is at bottom-6 (24px), button is ~40-50px tall, so top is at ~64-74px
+            // Overlap by 40px (30px + 10px more) to compensate for canvas/video gap
+            // When minimized, center Effie over the button
+            // Button is at right-6 (24px = 1.5rem), button is ~180px wide
+            // To perfectly center: button center is at 24px + 90px = 114px from right
+            // Effie (320px wide) center should be at 114px from right
+            // So Effie's right edge = 114px + 160px = 274px from right
+            // But since Effie is wider, align right edges and use transform to shift left
+            bottom: isMinimized ? '34px' : '394px',
+            right: isMinimized ? '1.5rem' : '1.5rem', // Align right edge with button
+            transform: isMinimized ? 'translateX(70px)' : 'none', // Shift right by 70px to center
+            pointerEvents: 'none' // Always allow clicks through so buttons are clickable
+          }}
+        >
+          <canvas
+            ref={canvasRef}
+            className="w-full h-full object-contain"
+            style={{ backgroundColor: 'transparent', display: 'block' }}
+          />
+        </div>
+      )}
+
+      {isMinimized ? (
+        <div className="fixed bottom-6 right-6 z-50">
+          <button
+            onClick={() => setIsMinimized(false)}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl shadow-lg flex items-center gap-2 text-sm font-medium transition"
+          >
+            <div className="relative">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+                <path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v4M8 22h8" />
+              </svg>
+              {agora?.isConnected && (
+                <div className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-green-400 rounded-full border border-white animate-pulse"></div>
+              )}
+            </div>
+            <span>AI Assistant</span>
+            {agora?.isConnected && (
+              <span className="text-xs bg-green-500 px-2 py-0.5 rounded-full">
+                Active
+              </span>
+            )}
+          </button>
+        </div>
+      ) : (
+        <div className="fixed bottom-6 right-6 z-50 w-80">
+      
+      <div className="bg-white rounded-xl shadow-2xl border border-gray-200 h-[400px] flex flex-col overflow-hidden relative">
         {/* Header */}
         <div className="flex items-center justify-between p-2.5 border-b border-gray-200 bg-white">
           <div className="flex items-center gap-2">
@@ -827,7 +1051,8 @@ export function ChatInterface({ product, onClose }: ChatInterfaceProps) {
             <button
               onClick={handleEndCall}
               disabled={isInitializing}
-              className="bg-red-500 hover:bg-red-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-3 py-1.5 rounded-lg transition font-medium flex items-center justify-center gap-1.5 text-xs"
+              className="bg-red-500 hover:bg-red-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white px-3 py-1.5 rounded-lg transition font-medium flex items-center justify-center gap-1.5 text-xs relative"
+              style={{ zIndex: 60 }}
               title="End conversation"
               aria-label="End conversation"
             >
@@ -1079,5 +1304,7 @@ export function ChatInterface({ product, onClose }: ChatInterfaceProps) {
         </div>
       </div>
     </div>
+      )}
+    </>
   );
 }

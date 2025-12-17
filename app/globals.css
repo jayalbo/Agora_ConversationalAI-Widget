@@ -9,4 +9,11 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+* {
+  word-break: normal;
+  overflow-wrap: break-word;
 }

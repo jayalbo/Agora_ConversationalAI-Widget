@@ -2,118 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import axios from "axios";
 import pkg from "agora-token";
 const { RtcTokenBuilder, RtcRole } = pkg;
+import { fetchProduct } from "@/lib/product";
 
-// Mock product data - in production, this would fetch from a database
-async function fetchProduct() {
-  return {
-    id: "1",
-    name: "Sony WH-1000XM5 Wireless Noise Cancelling Headphones",
-    price: 399.99,
-    originalPrice: 449.99,
-    discount: 11,
-    rating: 4.7,
-    reviewCount: 2847,
-    inStock: true,
-    description:
-      "Industry-leading noise cancellation with Dual Noise Sensor technology. Premium sound quality with LDAC codec support. Up to 30-hour battery life with quick charge. Comfortable design with soft pressure-relieving ear pads.",
-    specifications: {
-      "Noise Cancellation": "Industry-leading with Dual Noise Sensor",
-      "Battery Life": "Up to 30 hours",
-      "Quick Charge": "3 min charge = 3 hours playback",
-      Connectivity: "Bluetooth 5.2, NFC, 3.5mm jack",
-      Weight: "250g",
-      Color: "Black, Silver, Blue",
-    },
-    images: [
-      "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=800",
-      "https://images.unsplash.com/photo-1484704849700-f032a568e944?w=800",
-      "https://images.unsplash.com/photo-1572569511254-d8f925fe2cbb?w=800",
-    ],
-    reviews: [
-      {
-        id: 1,
-        userName: "Sarah M.",
-        rating: 5,
-        date: "2024-01-15",
-        title: "Best headphones I've ever owned!",
-        comment:
-          "The noise cancellation is incredible. I can barely hear anything when these are on. Sound quality is amazing and the battery lasts forever. Worth every penny!",
-        verified: true,
-      },
-      {
-        id: 2,
-        userName: "Michael T.",
-        rating: 5,
-        date: "2024-01-10",
-        title: "Perfect for travel",
-        comment:
-          "Used these on a 12-hour flight and they were a game changer. Comfortable for long periods and the noise cancellation made the flight so much better.",
-        verified: true,
-      },
-      {
-        id: 3,
-        userName: "Jessica L.",
-        rating: 4,
-        date: "2024-01-08",
-        title: "Great sound, minor comfort issue",
-        comment:
-          "Sound quality is excellent and noise cancellation works well. Only complaint is they can get a bit warm after wearing for several hours, but overall very satisfied.",
-        verified: true,
-      },
-      {
-        id: 4,
-        userName: "David K.",
-        rating: 5,
-        date: "2024-01-05",
-        title: "Worth the investment",
-        comment:
-          "I was hesitant about the price, but these are absolutely worth it. The build quality is premium and they sound incredible. Battery life is as advertised.",
-        verified: true,
-      },
-      {
-        id: 5,
-        userName: "Emily R.",
-        rating: 4,
-        date: "2024-01-03",
-        title: "Excellent but pricey",
-        comment:
-          "These are fantastic headphones with great features. The only reason I'm giving 4 stars is the price point, but if you can afford them, they're top tier.",
-        verified: true,
-      },
-      {
-        id: 6,
-        userName: "Robert P.",
-        rating: 5,
-        date: "2023-12-28",
-        title: "Outstanding quality",
-        comment:
-          "The sound clarity is unmatched. I use these for both music and calls, and the microphone quality is excellent. The touch controls are intuitive and responsive.",
-        verified: true,
-      },
-      {
-        id: 7,
-        userName: "Lisa W.",
-        rating: 4,
-        date: "2023-12-25",
-        title: "Great for work from home",
-        comment:
-          "Perfect for video calls and blocking out background noise. The comfort is good for all-day wear. Only wish the case was a bit smaller for travel.",
-        verified: true,
-      },
-    ],
-  };
-}
+// Note: Product data is now centralized in lib/product.ts
+// This keeps the code simple and maintainable for potential customers
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { channel, userId, token } = body;
+    const { channel, userId, token, productId } = body;
 
     console.log(`[POST] /api/agora/start-agent`);
     console.log(
       "Request body:",
       JSON.stringify(
-        { channel, userId, token: token?.substring(0, 20) + "..." },
+        { channel, userId, token: token?.substring(0, 20) + "...", productId },
         null,
         2
       )
@@ -126,10 +29,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get product context
-    const product = await fetchProduct();
-    const context = `You are a helpful shopping assistant for an e-commerce website. 
-Your primary focus is helping customers with this specific product, but you can also answer related shopping questions.
+    // Get product context - productId defaults to '1' if not provided
+    const product = await fetchProduct(productId || "1");
+    const context = `You are Katya, a fun, energetic, and enthusiastic shopping assistant! You're passionate about helping customers find the perfect product and you get genuinely excited about cool features. You have a warm, friendly personality with a touch of playfulness - think of yourself as that helpful friend who knows all about tech and loves sharing cool details.
+
+Your name is Katya, and you should introduce yourself naturally when appropriate. You're knowledgeable but never boring - you make product information interesting and engaging!
 
 Product: ${product.name}
 Price: $${product.price} (Original: $${product.originalPrice}, Save ${
@@ -144,7 +48,11 @@ ${Object.entries(product.specifications)
   .map(([key, value]) => `- ${key}: ${value}`)
   .join("\n")}
 
-Available Colors: Black, Silver, Blue
+${
+  product.specifications?.Colors
+    ? `Available Colors: ${product.specifications.Colors}`
+    : ""
+}
 
 Recent Customer Reviews:
 ${product.reviews
@@ -155,17 +63,34 @@ ${product.reviews
   )
   .join("\n\n")}
 
+YOUR PERSONALITY & STYLE:
+- Be enthusiastic and friendly - show genuine excitement about cool features
+- Use natural, conversational language (you can say things like "Oh, that's such a great question!" or "I love this feature!")
+- Be helpful and informative, but keep it fun and engaging
+- Show personality - you're not a robot, you're Effie!
+- When highlighting features, get a little excited about the cool ones (like AI learning, music sync, etc.)
+- Be warm and approachable - make customers feel comfortable asking questions
+- NEVER use emojis in your responses - use words to express emotion instead (this is critical for TTS compatibility)
+
 IMPORTANT RULES:
 1. Answer questions about this product, including: features, reviews, pricing, specifications, availability, colors, variants, shipping, returns, and any product-related questions
-2. If asked about product availability or colors, provide helpful information. For example, if asked "Can I get Red?" or "Do you have it in red?", explain the available colors (Black, Silver, Blue) and that red is not currently available
-3. If asked about unrelated topics (cooking, baking, recipes, weather, sports, politics, general knowledge, completely different products), politely redirect: "I'm here to help you with this product. Would you like to know about its features, reviews, or specifications?"
-4. Be helpful, friendly, and concise
-5. Reference specific reviews when relevant to answer questions
+2. If asked about product availability or colors, provide helpful information. ${
+      product.specifications?.Colors
+        ? `For example, if asked "Can I get Red?" or "Do you have it in red?", explain the available colors (${product.specifications.Colors}) and that red is not currently available`
+        : "If the product has color options, mention them. If not, explain that this product comes in the available options shown in the specifications."
+    }
+3. If asked about unrelated topics (cooking, baking, recipes, weather, sports, politics, general knowledge, completely different products), politely redirect with personality: "Oh, I'd love to chat about that, but I'm here to help you with the ${
+      product.name
+    }! Want to know about its awesome features or what customers are saying?"
+4. Be helpful, friendly, and engaging - show enthusiasm!
+5. Reference specific reviews when relevant to answer questions - mention what customers loved!
 6. If asked about availability, mention it's ${
       product.inStock ? "currently in stock" : "currently out of stock"
     }
-7. Help with purchase decisions by comparing features, mentioning reviews, and highlighting value
-8. Answer questions about product variants, colors, and options naturally and helpfully`;
+7. Help with purchase decisions by comparing features, mentioning reviews, and highlighting value - get excited about the cool features!
+8. Answer questions about product variants, colors, and options naturally and helpfully
+9. NEVER use emojis, symbols, or special characters that could break text-to-speech - use words to express emotions and reactions
+10. Remember: You're Effie - be yourself, be fun, and make shopping enjoyable!`;
 
     const APP_ID = process.env.AGORA_APP_ID;
     const API_KEY = process.env.AGORA_API_KEY;
@@ -210,7 +135,28 @@ IMPORTANT RULES:
       privilegeExpiredTs // RTM token expiration
     );
 
+    // Generate token for HeyGen avatar (UID 2000)
+    const avatarRtcUid = 2000;
+    const avatarToken = RtcTokenBuilder.buildTokenWithRtm2(
+      APP_ID,
+      APP_CERTIFICATE,
+      channel,
+      avatarRtcUid, // RTC UID for avatar (numeric)
+      role,
+      privilegeExpiredTs, // token expiration
+      privilegeExpiredTs, // join channel privilege
+      privilegeExpiredTs, // publish audio privilege
+      privilegeExpiredTs, // publish video privilege
+      privilegeExpiredTs, // publish data stream privilege
+      avatarRtcUid.toString(), // RTM user ID (string)
+      privilegeExpiredTs // RTM token expiration
+    );
+
     const auth = Buffer.from(`${API_KEY}:${API_SECRET}`).toString("base64");
+
+    // Get HeyGen configuration
+    const heygenApiToken = process.env.HEYGEN_API_TOKEN || "";
+    const heygenAvatarId = process.env.HEYGEN_AVATAR_ID || "";
 
     const payload = {
       name: `ecommerce_ai_agent_${Date.now()}_${Math.random()
@@ -227,6 +173,8 @@ IMPORTANT RULES:
         },
         parameters: {
           data_channel: "rtm", // Enable Signaling as the data transmission channel (required for transcripts)
+          audio_scenario: "chorus",
+          enable_aivad: true,
         },
         llm: {
           url:
@@ -248,15 +196,29 @@ IMPORTANT RULES:
           },
         },
         asr: {
+          vendor: "agora",
           language: "en-US",
+          params: {},
         },
         tts: {
           vendor: "microsoft",
           params: {
             key: process.env.TTS_API_KEY || "",
             region: process.env.TTS_REGION || "eastus",
-            voice_name: "en-US-AndrewMultilingualNeural",
+            voice_name: "en-US-AriaNeural",
+            sample_rate: 24000,
             rate: "1.3",
+          },
+        },
+        avatar: {
+          vendor: "heygen",
+          enable: heygenApiToken && heygenAvatarId ? true : false,
+          params: {
+            quality: "low",
+            api_key: heygenApiToken,
+            agora_uid: avatarRtcUid.toString(),
+            agora_token: avatarToken,
+            avatar_id: heygenAvatarId,
           },
         },
       },
